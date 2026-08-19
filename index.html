@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SoundPulse Pro - Player com PiP & Capas Personalizadas</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -60,12 +61,34 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between overflow-x-hidden selection:bg-brand-500 selection:text-white">
 
-    <!-- Elementos de áudio e vídeo ocultos para PiP stream -->
+    <!-- Elementos de áudio e vídeo para PiP stream (Usando offscreen ao invés de display:none para o Chrome renderizar os frames) -->
     <audio id="audioEngine" crossorigin="anonymous" preload="metadata"></audio>
-    <!-- Canvas que combina Capa + Visualizador para transmitir ao PiP -->
     <canvas id="pipCanvas" width="600" height="600" class="hidden"></canvas>
-    <!-- Elemento Video que ativa o Picture-in-Picture nativo do navegador -->
-    <video id="pipVideo" class="hidden" autoplay muted playsinline></video>
+    <video id="pipVideo" autoplay muted playsinline style="position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; top: -9999px; left: -9999px;"></video>
+
+    <!-- Floating In-Page PiP Card (Fallback e Modo Flutuante Alternativo) -->
+    <div id="inPagePipWidget" class="fixed bottom-20 right-6 z-50 glass-panel rounded-2xl p-3 shadow-2xl border border-brand-500/40 w-72 hidden transition-all duration-300 transform scale-100 hover:scale-105 group cursor-grab active:cursor-grabbing">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-brand-500 flex items-center gap-1.5">
+                <span class="w-2 h-2 rounded-full bg-brand-500 animate-ping"></span> Modo PiP Flutuante
+            </span>
+            <button id="btnCloseInPagePip" class="text-slate-400 hover:text-white text-xs p-1" title="Fechar PiP">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+        <div class="flex items-center gap-3">
+            <img id="pipWidgetCover" src="" class="w-14 h-14 rounded-xl object-cover border border-slate-700 shadow-md">
+            <div class="min-w-0 flex-1">
+                <p id="pipWidgetTitle" class="text-xs font-bold text-white truncate">Música</p>
+                <p id="pipWidgetArtist" class="text-[11px] text-slate-400 truncate">Artista</p>
+                <div class="flex items-center gap-3 mt-1.5">
+                    <button id="pipWidgetPrev" class="text-slate-300 hover:text-white text-xs"><i class="fa-solid fa-backward-step"></i></button>
+                    <button id="pipWidgetPlay" class="w-6 h-6 rounded-full bg-brand-500 text-slate-950 flex items-center justify-center text-xs font-bold"><i class="fa-solid fa-play" id="pipWidgetPlayIcon"></i></button>
+                    <button id="pipWidgetNext" class="text-slate-300 hover:text-white text-xs"><i class="fa-solid fa-forward-step"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Modal de Notificação Toast -->
     <div id="toast" class="fixed top-5 right-5 z-50 flex items-center gap-3 bg-slate-800 text-slate-100 px-5 py-3 rounded-xl shadow-2xl border border-slate-700 transition-all duration-300 transform translate-y-[-100px] opacity-0 pointer-events-none">
@@ -111,7 +134,7 @@
 
                 <!-- Album Art Container -->
                 <div class="relative w-64 h-64 md:w-72 md:h-72 rounded-2xl overflow-hidden shadow-2xl mb-6 border border-slate-700/60 bg-slate-900 group">
-                    <img id="currentCoverImage" src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&auto=format&fit=crop&q=80" alt="Capa da Música" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+                    <img id="currentCoverImage" crossorigin="anonymous" src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&auto=format&fit=crop&q=80" alt="Capa da Música" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
                     
                     <!-- Sound Wave Visualizer Overlay (Canvas) -->
                     <canvas id="visualizerCanvas" width="300" height="300" class="absolute inset-0 w-full h-full opacity-60 pointer-events-none"></canvas>
@@ -135,7 +158,7 @@
                 <div class="flex items-center gap-3 z-10">
                     <button id="btnPipToggle" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-purple-900/30 transition-all flex items-center gap-2 border border-purple-400/20 hover:scale-105 active:scale-95">
                         <i class="fa-solid fa-window-restore text-sm"></i>
-                        <span>Ativar Modo PiP</span>
+                        <span id="pipBtnLabel">Ativar Modo PiP</span>
                     </button>
                     
                     <button id="btnFavoriteToggle" class="bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-rose-500 p-2.5 rounded-xl border border-slate-700 transition-all">
@@ -411,9 +434,21 @@
 
             // PiP & Canvas
             btnPipToggle: document.getElementById('btnPipToggle'),
+            pipBtnLabel: document.getElementById('pipBtnLabel'),
             visualizerCanvas: document.getElementById('visualizerCanvas'),
             pipCanvas: document.getElementById('pipCanvas'),
             pipVideo: document.getElementById('pipVideo'),
+
+            // In-Page Floating PiP Widget
+            inPagePipWidget: document.getElementById('inPagePipWidget'),
+            btnCloseInPagePip: document.getElementById('btnCloseInPagePip'),
+            pipWidgetCover: document.getElementById('pipWidgetCover'),
+            pipWidgetTitle: document.getElementById('pipWidgetTitle'),
+            pipWidgetArtist: document.getElementById('pipWidgetArtist'),
+            pipWidgetPlay: document.getElementById('pipWidgetPlay'),
+            pipWidgetPlayIcon: document.getElementById('pipWidgetPlayIcon'),
+            pipWidgetPrev: document.getElementById('pipWidgetPrev'),
+            pipWidgetNext: document.getElementById('pipWidgetNext'),
 
             // Modals
             btnChangeCover: document.getElementById('btnChangeCover'),
@@ -644,6 +679,82 @@
             return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
         }
 
+        function renderPresetCovers() {
+            if (!DOM.presetCoversGrid) return;
+            DOM.presetCoversGrid.innerHTML = '';
+            PRESET_COVERS.forEach(url => {
+                const img = document.createElement('img');
+                img.src = url;
+                img.className = 'w-full h-20 object-cover rounded-xl cursor-pointer hover:scale-105 transition-transform border border-slate-700 hover:border-brand-500';
+                img.onclick = () => {
+                    applyCoverToCurrentTrack(url);
+                    closeCoverModal();
+                };
+                DOM.presetCoversGrid.appendChild(img);
+            });
+        }
+
+        function openCoverModalForTrack(trackId) {
+            if (trackId) {
+                state.activeTrackForCoverChange = trackId;
+            } else if (state.currentTrackIndex !== -1 && state.library[state.currentTrackIndex]) {
+                state.activeTrackForCoverChange = state.library[state.currentTrackIndex].id;
+            } else {
+                showToast("Nenhuma música selecionada para alterar a capa", "info");
+                return;
+            }
+            DOM.modalCoverArt.classList.remove('opacity-0', 'pointer-events-none');
+        }
+
+        function closeCoverModal() {
+            DOM.modalCoverArt.classList.add('opacity-0', 'pointer-events-none');
+        }
+
+        async function applyCoverToCurrentTrack(imageUrl) {
+            if (!state.activeTrackForCoverChange) return;
+            const track = state.library.find(t => t.id === state.activeTrackForCoverChange);
+            if (!track) return;
+
+            track.coverUrl = imageUrl;
+            await saveTrackToDB(track);
+
+            if (state.currentTrackIndex !== -1 && state.library[state.currentTrackIndex].id === track.id) {
+                DOM.currentCoverImage.crossOrigin = "anonymous";
+                DOM.currentCoverImage.src = imageUrl;
+                DOM.playerBarCover.src = imageUrl;
+                DOM.pipWidgetCover.src = imageUrl;
+                updateMediaSessionMetadata(track);
+            }
+
+            renderLibrary(DOM.searchInput.value);
+            showToast("Capa alterada com sucesso!", "success");
+        }
+
+        function updateMediaSessionMetadata(track) {
+            if ('mediaSession' in navigator && track) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: track.title || 'SoundPulse',
+                    artist: track.artist || 'Arquivo Local',
+                    album: 'SoundPulse Pro',
+                    artwork: [
+                        { src: track.coverUrl, sizes: '96x96', type: 'image/png' },
+                        { src: track.coverUrl, sizes: '128x128', type: 'image/png' },
+                        { src: track.coverUrl, sizes: '192x192', type: 'image/png' },
+                        { src: track.coverUrl, sizes: '512x512', type: 'image/png' },
+                    ]
+                });
+
+                try {
+                    navigator.mediaSession.setActionHandler('play', playAudio);
+                    navigator.mediaSession.setActionHandler('pause', pauseAudio);
+                    navigator.mediaSession.setActionHandler('previoustrack', playPrevTrack);
+                    navigator.mediaSession.setActionHandler('nexttrack', playNextTrack);
+                } catch (e) {
+                    console.warn('MediaSession actions:', e);
+                }
+            }
+        }
+
         function selectTrack(index, autoPlay = true) {
             if (index < 0 || index >= state.library.length) return;
 
@@ -653,11 +764,17 @@
             // Atualizar UI da Faixa Atual
             DOM.currentTrackTitle.textContent = track.title;
             DOM.currentTrackArtist.textContent = track.artist;
+            DOM.currentCoverImage.crossOrigin = "anonymous";
             DOM.currentCoverImage.src = track.coverUrl;
 
             DOM.playerBarTitle.textContent = track.title;
             DOM.playerBarArtist.textContent = track.artist;
             DOM.playerBarCover.src = track.coverUrl;
+
+            // Atualiza Widget PiP In-Page
+            DOM.pipWidgetTitle.textContent = track.title;
+            DOM.pipWidgetArtist.textContent = track.artist;
+            DOM.pipWidgetCover.src = track.coverUrl;
 
             // Define a fonte do áudio (usando URL.createObjectURL se for Blob enviado)
             if (track.audioBlob) {
@@ -685,6 +802,7 @@
             DOM.audio.play().then(() => {
                 state.isPlaying = true;
                 DOM.playPauseIcon.className = 'fa-solid fa-pause text-sm';
+                DOM.pipWidgetPlayIcon.className = 'fa-solid fa-pause';
                 renderLibrary(DOM.searchInput.value);
             }).catch(e => {
                 console.error("Erro ao tocar:", e);
@@ -696,6 +814,7 @@
             DOM.audio.pause();
             state.isPlaying = false;
             DOM.playPauseIcon.className = 'fa-solid fa-play text-sm ml-0.5';
+            DOM.pipWidgetPlayIcon.className = 'fa-solid fa-play';
             renderLibrary(DOM.searchInput.value);
         }
 
@@ -835,6 +954,7 @@
             // Desenha um Canvas contínuo com Capa da música + Espectro sonoro para alimentar o Video PiP
             const pCanvas = DOM.pipCanvas;
             const pCtx = pCanvas.getContext('2d');
+            let isCanvasClean = true;
 
             function renderPiPCanvasFrame() {
                 requestAnimationFrame(renderPiPCanvasFrame);
@@ -846,14 +966,40 @@
                 pCtx.fillStyle = grad;
                 pCtx.fillRect(0, 0, 600, 600);
 
-                // Desenha a Capa no centro
+                // Desenha a Capa no centro (ou fallback em vetor se houver restrição CORS)
                 const track = state.library[state.currentTrackIndex];
-                if (DOM.currentCoverImage.complete && DOM.currentCoverImage.naturalWidth !== 0) {
+                let imageDrawn = false;
+
+                if (DOM.currentCoverImage.complete && DOM.currentCoverImage.naturalWidth !== 0 && isCanvasClean) {
+                    try {
+                        pCtx.save();
+                        pCtx.beginPath();
+                        pCtx.roundRect(150, 80, 300, 300, 24);
+                        pCtx.clip();
+                        pCtx.drawImage(DOM.currentCoverImage, 150, 80, 300, 300);
+                        pCtx.restore();
+                        imageDrawn = true;
+                    } catch (e) {
+                        isCanvasClean = false;
+                        console.warn("Segurança do Canvas mantida com arte fallback:", e);
+                    }
+                }
+
+                // Fallback elegante caso a imagem não possa ser desenhada diretamente no Canvas
+                if (!imageDrawn) {
                     pCtx.save();
+                    pCtx.fillStyle = '#1e293b';
                     pCtx.beginPath();
                     pCtx.roundRect(150, 80, 300, 300, 24);
-                    pCtx.clip();
-                    pCtx.drawImage(DOM.currentCoverImage, 150, 80, 300, 300);
+                    pCtx.fill();
+                    pCtx.strokeStyle = '#22c55e';
+                    pCtx.lineWidth = 3;
+                    pCtx.stroke();
+                    
+                    pCtx.fillStyle = '#22c55e';
+                    pCtx.font = '72px sans-serif';
+                    pCtx.textAlign = 'center';
+                    pCtx.fillText('🎵', 300, 250);
                     pCtx.restore();
                 }
 
@@ -894,91 +1040,57 @@
 
             renderPiPCanvasFrame();
 
-            // Transmite a renderização do Canvas para o elemento Video oculto
-            const stream = pCanvas.captureStream(30);
-            DOM.pipVideo.srcObject = stream;
+            // Transmite o fluxo do Canvas para o elemento Video em segundo plano
+            try {
+                const stream = pCanvas.captureStream(30);
+                DOM.pipVideo.srcObject = stream;
+            } catch (e) {
+                console.warn("Canvas captureStream não suportado diretamente:", e);
+            }
         }
 
         async function togglePictureInPicture() {
-            try {
-                if (!document.pictureInPictureEnabled) {
-                    showToast("Picture-in-Picture não é suportado neste navegador", "error");
-                    return;
-                }
-
-                if (document.pictureInPictureElement) {
+            // Se o PiP nativo do SO já estiver ativo, sai dele
+            if (document.pictureInPictureElement) {
+                try {
                     await document.exitPictureInPicture();
                     showToast("Modo PiP desativado", "info");
-                } else {
-                    await DOM.pipVideo.play();
+                    return;
+                } catch (e) {
+                    console.error(e);
+                }
+            }
+
+            // Tentativa 1: Ativar Modo PiP Nativo do Navegador (OS Window)
+            let nativeSuccess = false;
+            if (document.pictureInPictureEnabled && DOM.pipVideo) {
+                try {
+                    // Garante que o vídeo offscreen esteja rodando o stream do canvas
+                    if (DOM.pipVideo.paused) {
+                        await DOM.pipVideo.play();
+                    }
                     await DOM.pipVideo.requestPictureInPicture();
-                    showToast("Modo PiP ativado com sucesso!", "success");
+                    nativeSuccess = true;
+                    showToast("Modo PiP (Janela Flutuante OS) ativado!", "success");
+                } catch (err) {
+                    console.warn("PiP Nativo bloqueado ou indisponível neste ambiente. Usando PiP Flutuante de Página:", err);
                 }
-            } catch (err) {
-                console.error("Erro no PiP:", err);
-                showToast("Clique na página antes de ativar o PiP", "info");
+            }
+
+            // Tentativa 2 / Fallback: Se o PiP Nativo falhar ou for bloqueado pelo iFrame, usa o Mini-Player Flutuante In-Page
+            if (!nativeSuccess) {
+                toggleInPagePipWidget();
             }
         }
 
-        function updateMediaSessionMetadata(track) {
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: track.title,
-                    artist: track.artist,
-                    album: 'SoundPulse Library',
-                    artwork: [
-                        { src: track.coverUrl, sizes: '512x512', type: 'image/png' }
-                    ]
-                });
-
-                navigator.mediaSession.setActionHandler('play', () => playAudio());
-                navigator.mediaSession.setActionHandler('pause', () => pauseAudio());
-                navigator.mediaSession.setActionHandler('previoustrack', () => playPrevTrack());
-                navigator.mediaSession.setActionHandler('nexttrack', () => playNextTrack());
-            }
-        }
-
-        function renderPresetCovers() {
-            DOM.presetCoversGrid.innerHTML = '';
-            PRESET_COVERS.forEach((url) => {
-                const btn = document.createElement('button');
-                btn.className = 'w-full h-20 rounded-xl overflow-hidden border-2 border-transparent hover:border-brand-500 transition-all focus:outline-none';
-                btn.innerHTML = `<img src="${url}" class="w-full h-full object-cover">`;
-                btn.onclick = () => applyCoverToCurrentTrack(url);
-                DOM.presetCoversGrid.appendChild(btn);
-            });
-        }
-
-        function openCoverModalForTrack(trackId) {
-            state.activeTrackForCoverChange = trackId;
-            DOM.modalCoverArt.classList.remove('opacity-0', 'pointer-events-none');
-            DOM.modalCoverArt.firstElementChild.classList.remove('scale-95');
-            DOM.modalCoverArt.firstElementChild.classList.add('scale-100');
-        }
-
-        function closeCoverModal() {
-            DOM.modalCoverArt.classList.add('opacity-0', 'pointer-events-none');
-            DOM.modalCoverArt.firstElementChild.classList.remove('scale-100');
-            DOM.modalCoverArt.firstElementChild.classList.add('scale-95');
-        }
-
-        async function applyCoverToCurrentTrack(coverUrl) {
-            const trackId = state.activeTrackForCoverChange || (state.library[state.currentTrackIndex] ? state.library[state.currentTrackIndex].id : null);
-            if (!trackId) return;
-
-            const track = state.library.find(t => t.id === trackId);
-            if (track) {
-                track.coverUrl = coverUrl;
-                await saveTrackToDB(track);
-
-                if (state.library[state.currentTrackIndex] && state.library[state.currentTrackIndex].id === trackId) {
-                    DOM.currentCoverImage.src = coverUrl;
-                    DOM.playerBarCover.src = coverUrl;
-                }
-
-                renderLibrary(DOM.searchInput.value);
-                closeCoverModal();
-                showToast("Capa da música atualizada!", "success");
+        function toggleInPagePipWidget() {
+            const isHidden = DOM.inPagePipWidget.classList.contains('hidden');
+            if (isHidden) {
+                DOM.inPagePipWidget.classList.remove('hidden');
+                showToast("Modo PiP Flutuante na tela ativado!", "success");
+            } else {
+                DOM.inPagePipWidget.classList.add('hidden');
+                showToast("Modo PiP desativado", "info");
             }
         }
 
@@ -1013,6 +1125,20 @@
             DOM.btnPlayPause.addEventListener('click', togglePlayPause);
             DOM.btnNext.addEventListener('click', playNextTrack);
             DOM.btnPrev.addEventListener('click', playPrevTrack);
+
+            // Controles do PiP Flutuante In-Page Widget
+            DOM.pipWidgetPlay.addEventListener('click', togglePlayPause);
+            DOM.pipWidgetNext.addEventListener('click', playNextTrack);
+            DOM.pipWidgetPrev.addEventListener('click', playPrevTrack);
+            DOM.btnCloseInPagePip.addEventListener('click', () => DOM.inPagePipWidget.classList.add('hidden'));
+
+            // Escuta mudança do estado PiP nativo do sistema
+            DOM.pipVideo.addEventListener('enterpictureinpicture', () => {
+                DOM.pipBtnLabel.textContent = "Sair do PiP";
+            });
+            DOM.pipVideo.addEventListener('leavepictureinpicture', () => {
+                DOM.pipBtnLabel.textContent = "Ativar Modo PiP";
+            });
 
             DOM.btnShuffle.addEventListener('click', () => {
                 state.isShuffle = !state.isShuffle;
@@ -1080,10 +1206,13 @@
                     const reader = new FileReader();
                     reader.onload = (event) => {
                         applyCoverToCurrentTrack(event.target.result);
+                        closeCoverModal();
                     };
                     reader.readAsDataURL(file);
                 }
             });
+
+            makePipWidgetDraggable();
 
             // Modal Equalizador
             DOM.btnOpenEqualizer.addEventListener('click', () => {
@@ -1122,6 +1251,50 @@
             DOM.searchInput.addEventListener('input', (e) => {
                 renderLibrary(e.target.value);
             });
+        }
+
+        function makePipWidgetDraggable() {
+            const widget = DOM.inPagePipWidget;
+            if (!widget) return;
+
+            let isDragging = false;
+            let initialX, initialY;
+            let xOffset = 0, yOffset = 0;
+
+            widget.addEventListener('mousedown', dragStart);
+            document.addEventListener('mousemove', drag);
+            document.addEventListener('mouseup', dragEnd);
+
+            widget.addEventListener('touchstart', dragStart, { passive: true });
+            document.addEventListener('touchmove', drag, { passive: true });
+            document.addEventListener('touchend', dragEnd);
+
+            function dragStart(e) {
+                if (e.target.closest('button')) return;
+                if (e.type === "touchstart") {
+                    initialX = e.touches[0].clientX - xOffset;
+                    initialY = e.touches[0].clientY - yOffset;
+                } else {
+                    initialX = e.clientX - xOffset;
+                    initialY = e.clientY - yOffset;
+                }
+                isDragging = true;
+            }
+
+            function drag(e) {
+                if (!isDragging) return;
+                const clientX = e.type === "touchmove" ? e.touches[0].clientX : e.clientX;
+                const clientY = e.type === "touchmove" ? e.touches[0].clientY : e.clientY;
+                xOffset = clientX - initialX;
+                yOffset = clientY - initialY;
+                widget.style.transform = `translate3d(${xOffset}px, ${yOffset}px, 0)`;
+            }
+
+            function dragEnd() {
+                initialX = xOffset;
+                initialY = yOffset;
+                isDragging = false;
+            }
         }
 
         function formatTime(seconds) {
