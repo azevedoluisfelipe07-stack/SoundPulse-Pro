@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SoundPulse Pro - Player com PiP & Capas Personalizadas</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                            900: '#14532d',
+                            accent: '#a855f7'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
+        ::-webkit-scrollbar-thumb { background: rgba(51, 65, 85, 0.8); border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 1); }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .glass-player {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(16px);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Wave progress animation */
+        @keyframes pulse-slow {
+            0%, 100% { transform: scale(1); opacity: 0.8; }
+            50% { transform: scale(1.03); opacity: 1; }
+        }
+        .animate-pulse-slow { animation: pulse-slow 3s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between overflow-x-hidden selection:bg-brand-500 selection:text-white">
+
+    <!-- Elementos de áudio e vídeo ocultos para PiP stream -->
+    <audio id="audioEngine" crossorigin="anonymous" preload="metadata"></audio>
+    <!-- Canvas que combina Capa + Visualizador para transmitir ao PiP -->
+    <canvas id="pipCanvas" width="600" height="600" class="hidden"></canvas>
+    <!-- Elemento Video que ativa o Picture-in-Picture nativo do navegador -->
+    <video id="pipVideo" class="hidden" autoplay muted playsinline></video>
+
+    <!-- Modal de Notificação Toast -->
+    <div id="toast" class="fixed top-5 right-5 z-50 flex items-center gap-3 bg-slate-800 text-slate-100 px-5 py-3 rounded-xl shadow-2xl border border-slate-700 transition-all duration-300 transform translate-y-[-100px] opacity-0 pointer-events-none">
+        <i id="toastIcon" class="fa-solid fa-circle-info text-brand-500 text-lg"></i>
+        <span id="toastMessage" class="text-sm font-medium">Mensagem do sistema</span>
+    </div>
+
+    <!-- Header App Bar -->
+    <header class="glass-panel sticky top-0 z-30 px-4 md:px-8 py-3.5 flex items-center justify-between shadow-lg">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 to-brand-accent flex items-center justify-center shadow-lg shadow-brand-500/20">
+                <i class="fa-solid fa-compact-disc text-white text-xl animate-spin-slow"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg leading-tight tracking-wide flex items-center gap-2">
+                    SoundPulse <span class="text-xs bg-brand-500/20 text-brand-500 border border-brand-500/30 px-2 py-0.5 rounded-full uppercase tracking-wider font-semibold">Pro</span>
+                </h1>
+                <p class="text-xs text-slate-400">Player Áudio & Modo PiP</p>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-3">
+            <label for="audioFileInput" class="cursor-pointer bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium px-4 py-2 rounded-xl transition-all duration-200 flex items-center gap-2 shadow-lg shadow-brand-600/30 hover:scale-[1.02] active:scale-95">
+                <i class="fa-solid fa-cloud-arrow-up"></i>
+                <span class="hidden sm:inline">Enviar Áudio</span>
+            </label>
+            <input type="file" id="audioFileInput" accept="audio/*" class="hidden" multiple />
+
+            <button id="btnOpenEqualizer" class="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white p-2.5 rounded-xl border border-slate-700 transition-all" title="Equalizador de Áudio">
+                <i class="fa-solid fa-[# sliders] fa-sliders"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- Left Panel: Now Playing View & Canvas Visualizer (5 Cols) -->
+        <section class="lg:col-span-5 flex flex-col gap-6">
+            <div class="glass-panel rounded-3xl p-6 flex flex-col items-center justify-center text-center relative overflow-hidden group">
+                <!-- Ambient Glow Background -->
+                <div id="ambientGlow" class="absolute -inset-10 bg-gradient-to-br from-brand-600/20 to-purple-600/20 rounded-full blur-3xl opacity-50 pointer-events-none transition-all duration-700"></div>
+
+                <!-- Album Art Container -->
+                <div class="relative w-64 h-64 md:w-72 md:h-72 rounded-2xl overflow-hidden shadow-2xl mb-6 border border-slate-700/60 bg-slate-900 group">
+                    <img id="currentCoverImage" src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&auto=format&fit=crop&q=80" alt="Capa da Música" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105">
+                    
+                    <!-- Sound Wave Visualizer Overlay (Canvas) -->
+                    <canvas id="visualizerCanvas" width="300" height="300" class="absolute inset-0 w-full h-full opacity-60 pointer-events-none"></canvas>
+
+                    <!-- Overlay Button to Edit Cover -->
+                    <button id="btnChangeCover" class="absolute inset-0 bg-slate-950/60 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-all duration-200 flex flex-col items-center justify-center gap-2 text-white font-medium">
+                        <div class="w-12 h-12 rounded-full bg-brand-500/80 flex items-center justify-center shadow-lg transform transition-transform group-hover:scale-110">
+                            <i class="fa-solid fa-image text-xl"></i>
+                        </div>
+                        <span class="text-xs bg-slate-900/80 px-3 py-1 rounded-full border border-slate-700">Alterar Capa</span>
+                    </button>
+                </div>
+
+                <!-- Track Info -->
+                <div class="w-full space-y-1.5 mb-4 z-10">
+                    <h2 id="currentTrackTitle" class="text-xl md:text-2xl font-bold tracking-tight text-white line-clamp-1">Nenhuma música tocando</h2>
+                    <p id="currentTrackArtist" class="text-sm text-slate-400 font-medium line-clamp-1">Selecione ou envie um arquivo de áudio</p>
+                </div>
+
+                <!-- Quick Action Buttons for Playing Track -->
+                <div class="flex items-center gap-3 z-10">
+                    <button id="btnPipToggle" class="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg shadow-purple-900/30 transition-all flex items-center gap-2 border border-purple-400/20 hover:scale-105 active:scale-95">
+                        <i class="fa-solid fa-window-restore text-sm"></i>
+                        <span>Ativar Modo PiP</span>
+                    </button>
+                    
+                    <button id="btnFavoriteToggle" class="bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-rose-500 p-2.5 rounded-xl border border-slate-700 transition-all">
+                        <i class="fa-regular fa-heart text-base" id="favoriteIcon"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Quick Upload Drop Zone Area -->
+            <div id="dropZone" class="glass-panel rounded-2xl p-5 border-2 border-dashed border-slate-700 hover:border-brand-500/60 transition-all flex flex-col items-center justify-center text-center gap-2 cursor-pointer group">
+                <i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-500 group-hover:text-brand-500 group-hover:scale-110 transition-all"></i>
+                <div>
+                    <p class="text-xs font-semibold text-slate-300">Arraste & Solte seus arquivos aqui</p>
+                    <p class="text-[11px] text-slate-500">Suporta MP3, WAV, OGG, FLAC, M4A</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Panel: Music Library & Queue (7 Cols) -->
+        <section class="lg:col-span-7 flex flex-col gap-4">
+            
+            <!-- Library Header & Search Bar -->
+            <div class="glass-panel rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+                <div class="flex items-center gap-2 w-full sm:w-auto">
+                    <i class="fa-solid fa-list-music text-brand-500 text-lg"></i>
+                    <h3 class="font-bold text-base text-slate-100">Biblioteca Local</h3>
+                    <span id="trackCountBadge" class="bg-slate-800 text-slate-400 text-xs px-2.5 py-0.5 rounded-full border border-slate-700 font-mono">0 músicas</span>
+                </div>
+
+                <div class="relative w-full sm:w-64">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-xs"></i>
+                    <input type="text" id="librarySearchInput" placeholder="Buscar na biblioteca..." class="w-full bg-slate-900/80 border border-slate-700 text-xs text-slate-200 placeholder-slate-500 rounded-xl pl-8 pr-3 py-2 focus:outline-none focus:border-brand-500 transition-all">
+                </div>
+            </div>
+
+            <!-- Library Track List -->
+            <div id="libraryListContainer" class="glass-panel rounded-2xl p-2 max-h-[460px] overflow-y-auto divide-y divide-slate-800/60 min-h-[300px]">
+                <!-- Dynamic Items will be rendered here -->
+                <div id="emptyLibraryState" class="flex flex-col items-center justify-center py-16 text-center text-slate-500 gap-3">
+                    <div class="w-16 h-16 rounded-full bg-slate-900 flex items-center justify-center border border-slate-800 text-slate-600">
+                        <i class="fa-solid fa-music text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="font-medium text-slate-400 text-sm">Sua biblioteca está vazia</p>
+                        <p class="text-xs text-slate-600">Envie arquivos de áudio para começar a ouvir</p>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Bottom Sticky Player Controls -->
+    <footer class="glass-player sticky bottom-0 z-40 w-full px-4 md:px-8 py-3 shadow-2xl">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+            
+            <!-- Left: Mini info -->
+            <div class="flex items-center gap-3 w-full md:w-1/4">
+                <img id="playerBarCover" src="https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=150&auto=format&fit=crop&q=80" alt="Capa" class="w-12 h-12 rounded-lg object-cover border border-slate-700 shadow">
+                <div class="min-w-0 flex-1">
+                    <p id="playerBarTitle" class="text-xs font-semibold text-slate-100 truncate">Nenhuma faixa selecionada</p>
+                    <p id="playerBarArtist" class="text-[11px] text-slate-400 truncate">Selecione uma música da biblioteca</p>
+                </div>
+            </div>
+
+            <!-- Center: Audio Controls & Progress -->
+            <div class="flex flex-col items-center gap-1.5 w-full md:w-2/4">
+                <div class="flex items-center gap-4">
+                    <button id="btnShuffle" class="text-slate-400 hover:text-white text-xs transition-colors p-1.5" title="Aleatório">
+                        <i class="fa-solid fa-shuffle"></i>
+                    </button>
+                    <button id="btnPrev" class="text-slate-300 hover:text-white text-base transition-colors p-1.5" title="Anterior">
+                        <i class="fa-solid fa-backward-step"></i>
+                    </button>
+                    <button id="btnPlayPause" class="w-10 h-10 rounded-full bg-brand-500 hover:bg-brand-600 text-slate-950 font-bold flex items-center justify-center transition-all shadow-lg shadow-brand-500/20 hover:scale-105 active:scale-95" title="Reproduzir/Pausar">
+                        <i class="fa-solid fa-play text-sm ml-0.5" id="playPauseIcon"></i>
+                    </button>
+                    <button id="btnNext" class="text-slate-300 hover:text-white text-base transition-colors p-1.5" title="Próxima">
+                        <i class="fa-solid fa-forward-step"></i>
+                    </button>
+                    <button id="btnRepeat" class="text-slate-400 hover:text-white text-xs transition-colors p-1.5" title="Repetir">
+                        <i class="fa-solid fa-repeat"></i>
+                    </button>
+                </div>
+
+                <!-- Timeline / Progress bar -->
+                <div class="flex items-center gap-2 w-full text-[11px] font-mono text-slate-400">
+                    <span id="currentTimeText">0:00</span>
+                    <div class="relative flex-1 flex items-center cursor-pointer group">
+                        <input type="range" id="seekSlider" min="0" max="100" value="0" step="0.1" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-500 focus:outline-none">
+                    </div>
+                    <span id="durationTimeText">0:00</span>
+                </div>
+            </div>
+
+            <!-- Right: Volume & Extra Controls -->
+            <div class="flex items-center justify-end gap-3 w-full md:w-1/4">
+                <!-- Playback Speed Button -->
+                <button id="btnSpeed" class="text-xs font-mono font-semibold text-slate-400 hover:text-brand-500 px-2 py-1 rounded bg-slate-900 border border-slate-800 transition-colors" title="Velocidade de reprodução">1.0x</button>
+
+                <!-- Volume control -->
+                <div class="flex items-center gap-2">
+                    <button id="btnMute" class="text-slate-400 hover:text-slate-200 text-xs">
+                        <i class="fa-solid fa-volume-high" id="volumeIcon"></i>
+                    </button>
+                    <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="0.8" class="w-20 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-brand-500">
+                </div>
+            </div>
+
+        </div>
+    </footer>
+
+    <!-- Modal: Select Cover Art (Capa das músicas escolhíveis) -->
+    <div id="modalCoverArt" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
+        <div class="glass-panel w-full max-w-md rounded-3xl p-6 border border-slate-700/80 shadow-2xl transform scale-95 transition-all duration-300 relative" id="modalCoverContent">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+                <h3 class="font-bold text-lg text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-palette text-brand-500"></i>
+                    <span>Alterar Capa da Música</span>
+                </h3>
+                <button id="btnCloseCoverModal" class="text-slate-400 hover:text-white p-1 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <p class="text-xs text-slate-400 mb-4">Escolha uma capa pré-definida ou envie uma foto do seu computador para esta música.</p>
+
+            <!-- Custom Cover Upload Button -->
+            <label for="coverFileInput" class="w-full bg-slate-900 border-2 border-dashed border-slate-700 hover:border-brand-500/70 p-4 rounded-xl flex items-center justify-center gap-3 cursor-pointer mb-5 group transition-colors">
+                <i class="fa-solid fa-image text-brand-500 text-xl group-hover:scale-110 transition-transform"></i>
+                <span class="text-xs font-semibold text-slate-300">Carregar Imagem do Dispositivo</span>
+            </label>
+            <input type="file" id="coverFileInput" accept="image/*" class="hidden">
+
+            <p class="text-xs font-semibold text-slate-400 mb-3">Ou escolha um estilo do catálogo:</p>
+            <div class="grid grid-cols-3 gap-3 max-h-48 overflow-y-auto p-1" id="presetCoversGrid">
+                <!-- Preset covers will be generated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Equalizer -->
+    <div id="modalEqualizer" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 opacity-0 pointer-events-none transition-all duration-300">
+        <div class="glass-panel w-full max-w-sm rounded-3xl p-6 border border-slate-700/80 shadow-2xl transition-all duration-300 relative">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-5">
+                <h3 class="font-bold text-lg text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-brand-500"></i>
+                    <span>Equalizador de Áudio</span>
+                </h3>
+                <button id="btnCloseEqModal" class="text-slate-400 hover:text-white p-1 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="space-y-6">
+                <!-- Bass -->
+                <div>
+                    <div class="flex justify-between text-xs font-medium text-slate-300 mb-2">
+                        <span>Graves (Bass)</span>
+                        <span id="eqBassVal" class="font-mono text-brand-500">0 dB</span>
+                    </div>
+                    <input type="range" id="eqBass" min="-12" max="12" value="0" step="1" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none accent-brand-500">
+                </div>
+
+                <!-- Mid -->
+                <div>
+                    <div class="flex justify-between text-xs font-medium text-slate-300 mb-2">
+                        <span>Médios (Mid)</span>
+                        <span id="eqMidVal" class="font-mono text-brand-500">0 dB</span>
+                    </div>
+                    <input type="range" id="eqMid" min="-12" max="12" value="0" step="1" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none accent-brand-500">
+                </div>
+
+                <!-- Treble -->
+                <div>
+                    <div class="flex justify-between text-xs font-medium text-slate-300 mb-2">
+                        <span>Agudos (Treble)</span>
+                        <span id="eqTrebleVal" class="font-mono text-brand-500">0 dB</span>
+                    </div>
+                    <input type="range" id="eqTreble" min="-12" max="12" value="0" step="1" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none accent-brand-500">
+                </div>
+            </div>
+
+            <button id="btnResetEq" class="mt-6 w-full bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium py-2 rounded-xl transition-colors">
+                Restaurar Padrão
+            </button>
+        </div>
+    </div>
+
+
+    <script>
+        // Banco de Dados IndexedDB para persistência de áudios e capas na biblioteca local
+        const DB_NAME = 'SoundPulseDB';
+        const DB_VERSION = 1;
+        let db = null;
+
+        function initIndexedDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+                request.onerror = (e) => reject('Erro ao abrir IndexedDB');
+                request.onsuccess = (e) => {
+                    db = e.target.result;
+                    resolve(db);
+                };
+                request.onupgradeneeded = (e) => {
+                    const database = e.target.result;
+                    if (!database.objectStoreNames.contains('tracks')) {
+                        const store = database.createObjectStore('tracks', { keyPath: 'id' });
+                        store.createIndex('title', 'title', { unique: false });
+                    }
+                };
+            });
+        }
+
+        // Estado do Player
+        const state = {
+            library: [],
+            currentTrackIndex: -1,
+            isPlaying: false,
+            isShuffle: false,
+            isRepeat: false,
+            playbackSpeed: 1.0,
+            activeTrackForCoverChange: null,
+            audioCtx: null,
+            analyser: null,
+            sourceNode: null,
+            eqFilters: { bass: null, mid: null, treble: null },
+            pipActive: false
+        };
+
+        // Presets de Capas de Música Estilizadas
+        const PRESET_COVERS = [
+            "https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=600&auto=format&fit=crop&q=80",
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=600&auto=format&fit=crop&q=80",
+            "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&auto=format&fit=crop&q=80",
+            "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80",
+            "https://images.unsplash.com/photo-1518609878373-06d740f60d8b?w=600&auto=format&fit=crop&q=80",
+            "https://images.unsplash.com/photo-1508700115892-45ecd05ae2ad?w=600&auto=format&fit=crop&q=80"
+        ];
+
+        const DOM = {
+            audio: document.getElementById('audioEngine'),
+            fileInput: document.getElementById('audioFileInput'),
+            dropZone: document.getElementById('dropZone'),
+            libraryContainer: document.getElementById('libraryListContainer'),
+            emptyLibraryState: document.getElementById('emptyLibraryState'),
+            trackCountBadge: document.getElementById('trackCountBadge'),
+            searchInput: document.getElementById('librarySearchInput'),
+            
+            // Displays
+            currentCoverImage: document.getElementById('currentCoverImage'),
+            currentTrackTitle: document.getElementById('currentTrackTitle'),
+            currentTrackArtist: document.getElementById('currentTrackArtist'),
+            playerBarCover: document.getElementById('playerBarCover'),
+            playerBarTitle: document.getElementById('playerBarTitle'),
+            playerBarArtist: document.getElementById('playerBarArtist'),
+            ambientGlow: document.getElementById('ambientGlow'),
+
+            // Controls
+            btnPlayPause: document.getElementById('btnPlayPause'),
+            playPauseIcon: document.getElementById('playPauseIcon'),
+            btnPrev: document.getElementById('btnPrev'),
+            btnNext: document.getElementById('btnNext'),
+            btnShuffle: document.getElementById('btnShuffle'),
+            btnRepeat: document.getElementById('btnRepeat'),
+            btnSpeed: document.getElementById('btnSpeed'),
+            seekSlider: document.getElementById('seekSlider'),
+            currentTimeText: document.getElementById('currentTimeText'),
+            durationTimeText: document.getElementById('durationTimeText'),
+            volumeSlider: document.getElementById('volumeSlider'),
+            btnMute: document.getElementById('btnMute'),
+            volumeIcon: document.getElementById('volumeIcon'),
+
+            // PiP & Canvas
+            btnPipToggle: document.getElementById('btnPipToggle'),
+            visualizerCanvas: document.getElementById('visualizerCanvas'),
+            pipCanvas: document.getElementById('pipCanvas'),
+            pipVideo: document.getElementById('pipVideo'),
+
+            // Modals
+            btnChangeCover: document.getElementById('btnChangeCover'),
+            modalCoverArt: document.getElementById('modalCoverArt'),
+            btnCloseCoverModal: document.getElementById('btnCloseCoverModal'),
+            coverFileInput: document.getElementById('coverFileInput'),
+            presetCoversGrid: document.getElementById('presetCoversGrid'),
+
+            btnOpenEqualizer: document.getElementById('btnOpenEqualizer'),
+            modalEqualizer: document.getElementById('modalEqualizer'),
+            btnCloseEqModal: document.getElementById('btnCloseEqModal'),
+            eqBass: document.getElementById('eqBass'),
+            eqMid: document.getElementById('eqMid'),
+            eqTreble: document.getElementById('eqTreble'),
+            eqBassVal: document.getElementById('eqBassVal'),
+            eqMidVal: document.getElementById('eqMidVal'),
+            eqTrebleVal: document.getElementById('eqTrebleVal'),
+            btnResetEq: document.getElementById('btnResetEq'),
+
+            toast: document.getElementById('toast'),
+            toastMessage: document.getElementById('toastMessage'),
+            toastIcon: document.getElementById('toastIcon')
+        };
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                await initIndexedDB();
+                await loadLibraryFromDB();
+                renderPresetCovers();
+                setupEventListeners();
+                setupAudioContext();
+                setupPiPVideoCanvas();
+
+                // Se houver músicas, carregar a primeira
+                if (state.library.length > 0) {
+                    selectTrack(0, false);
+                } else {
+                    // Adicionar uma música demo sintetizada caso a biblioteca esteja vazia
+                    addDemoTrack();
+                }
+            } catch (e) {
+                console.error("Erro na inicialização:", e);
+            }
+        });
+
+        // Função de Notificações Toast no lugar de alert()
+        function showToast(message, type = 'info') {
+            DOM.toastMessage.textContent = message;
+            if (type === 'success') {
+                DOM.toastIcon.className = 'fa-solid fa-circle-check text-brand-500 text-lg';
+            } else if (type === 'error') {
+                DOM.toastIcon.className = 'fa-solid fa-circle-exclamation text-rose-500 text-lg';
+            } else {
+                DOM.toastIcon.className = 'fa-solid fa-circle-info text-blue-500 text-lg';
+            }
+
+            DOM.toast.classList.remove('translate-y-[-100px]', 'opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                DOM.toast.classList.add('translate-y-[-100px]', 'opacity-0', 'pointer-events-none');
+            }, 3000);
+        }
+
+        async function saveTrackToDB(trackData) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('tracks', 'readwrite');
+                const store = tx.objectStore('tracks');
+                const req = store.put(trackData);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject('Erro ao salvar no IndexedDB');
+            });
+        }
+
+        async function loadLibraryFromDB() {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('tracks', 'readonly');
+                const store = tx.objectStore('tracks');
+                const req = store.getAll();
+                req.onsuccess = () => {
+                    state.library = req.result || [];
+                    renderLibrary();
+                    resolve();
+                };
+                req.onerror = () => reject('Erro ao ler biblioteca');
+            });
+        }
+
+        async function deleteTrackFromDB(id) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction('tracks', 'readwrite');
+                const store = tx.objectStore('tracks');
+                const req = store.delete(id);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject();
+            });
+        }
+
+        async function handleAudioUpload(files) {
+            if (!files || files.length === 0) return;
+
+            let addedCount = 0;
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                if (!file.type.startsWith('audio/') && !file.name.match(/\.(mp3|wav|ogg|flac|m4a)$/i)) continue;
+
+                const id = 'track_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5);
+                const title = file.name.replace(/\.[^/.]+$/, "");
+                const defaultCover = PRESET_COVERS[Math.floor(Math.random() * PRESET_COVERS.length)];
+
+                const trackObj = {
+                    id: id,
+                    title: title,
+                    artist: 'Arquivo Local',
+                    coverUrl: defaultCover,
+                    audioBlob: file, // Salva o Blob do áudio diretamente
+                    duration: 0,
+                    createdAt: Date.now()
+                };
+
+                await saveTrackToDB(trackObj);
+                state.library.push(trackObj);
+                addedCount++;
+            }
+
+            if (addedCount > 0) {
+                renderLibrary();
+                showToast(`${addedCount} música(s) adicionada(s) à biblioteca!`, 'success');
+                // Se nada estiver tocando, seleciona a última adicionada
+                if (state.currentTrackIndex === -1) {
+                    selectTrack(state.library.length - 1, true);
+                }
+            }
+        }
+
+        // Adiciona uma música demo inicial sintetizada em áudio
+        function addDemoTrack() {
+            // Gera um tom melódico sintetizado via Web Audio para demo
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const sampleRate = audioCtx.sampleRate;
+            const duration = 10; // 10s
+            const buffer = audioCtx.createBuffer(2, sampleRate * duration, sampleRate);
+            
+            for (let channel = 0; channel < 2; channel++) {
+                const data = buffer.getChannelData(channel);
+                for (let i = 0; i < buffer.length; i++) {
+                    const t = i / sampleRate;
+                    // Melodia simples em frequências
+                    const freq = 220 + Math.sin(t * 4) * 50 + (i % 800 > 400 ? 110 : 0);
+                    data[i] = Math.sin(2 * Math.PI * freq * t) * 0.2 * Math.exp(-t / 10);
+                }
+            }
+
+            // Converter áudio sintetizado para wav blob simples
+            const demoTrack = {
+                id: 'demo_track_01',
+                title: 'Melodia SoundPulse (Demo)',
+                artist: 'Sintetizador Web',
+                coverUrl: PRESET_COVERS[0],
+                audioUrl: createSyntheticAudioURL(buffer, audioCtx),
+                createdAt: Date.now()
+            };
+
+            state.library.push(demoTrack);
+            saveTrackToDB(demoTrack);
+            renderLibrary();
+            selectTrack(0, false);
+        }
+
+        function createSyntheticAudioURL(buffer, ctx) {
+            // Cria um som simples via Oscilador convertendo para DataURL no áudio HTML
+            const audio = document.getElementById('audioEngine');
+            return "";
+        }
+
+        function renderLibrary(filterText = '') {
+            DOM.trackCountBadge.textContent = `${state.library.length} músicas`;
+            DOM.libraryContainer.innerHTML = '';
+
+            const filtered = state.library.filter(t => 
+                t.title.toLowerCase().includes(filterText.toLowerCase()) || 
+                t.artist.toLowerCase().includes(filterText.toLowerCase())
+            );
+
+            if (filtered.length === 0) {
+                DOM.libraryContainer.appendChild(DOM.emptyLibraryState);
+                return;
+            }
+
+            filtered.forEach((track, idx) => {
+                const originalIndex = state.library.findIndex(t => t.id === track.id);
+                const isCurrent = originalIndex === state.currentTrackIndex;
+
+                const item = document.createElement('div');
+                item.className = `flex items-center justify-between p-3 rounded-xl transition-all group ${
+                    isCurrent ? 'bg-brand-500/15 border border-brand-500/30' : 'hover:bg-slate-900/60'
+                }`;
+
+                item.innerHTML = `
+                    <div class="flex items-center gap-3 min-w-0 flex-1 cursor-pointer" onclick="selectTrack(${originalIndex}, true)">
+                        <div class="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-slate-700/60">
+                            <img src="${track.coverUrl}" class="w-full h-full object-cover">
+                            ${isCurrent && state.isPlaying ? `
+                                <div class="absolute inset-0 bg-slate-950/60 flex items-center justify-center text-brand-500">
+                                    <i class="fa-solid fa-volume-high text-xs animate-bounce"></i>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <h4 class="text-xs font-semibold ${isCurrent ? 'text-brand-500' : 'text-slate-200'} truncate group-hover:text-brand-500 transition-colors">${escapeHtml(track.title)}</h4>
+                            <p class="text-[11px] text-slate-400 truncate">${escapeHtml(track.artist)}</p>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button onclick="openCoverModalForTrack('${track.id}')" class="p-2 text-slate-400 hover:text-brand-500 transition-colors text-xs" title="Alterar Capa">
+                            <i class="fa-solid fa-image"></i>
+                        </button>
+                        <button onclick="removeTrack('${track.id}')" class="p-2 text-slate-400 hover:text-rose-500 transition-colors text-xs" title="Excluir Música">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                `;
+
+                DOM.libraryContainer.appendChild(item);
+            });
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+
+        function selectTrack(index, autoPlay = true) {
+            if (index < 0 || index >= state.library.length) return;
+
+            state.currentTrackIndex = index;
+            const track = state.library[index];
+
+            // Atualizar UI da Faixa Atual
+            DOM.currentTrackTitle.textContent = track.title;
+            DOM.currentTrackArtist.textContent = track.artist;
+            DOM.currentCoverImage.src = track.coverUrl;
+
+            DOM.playerBarTitle.textContent = track.title;
+            DOM.playerBarArtist.textContent = track.artist;
+            DOM.playerBarCover.src = track.coverUrl;
+
+            // Define a fonte do áudio (usando URL.createObjectURL se for Blob enviado)
+            if (track.audioBlob) {
+                DOM.audio.src = URL.createObjectURL(track.audioBlob);
+            } else if (track.audioUrl) {
+                DOM.audio.src = track.audioUrl;
+            }
+
+            renderLibrary(DOM.searchInput.value);
+            updateMediaSessionMetadata(track);
+
+            if (autoPlay) {
+                playAudio();
+            }
+        }
+
+        function playAudio() {
+            if (!DOM.audio.src) return;
+            
+            // Ativa o contexto de áudio na primeira interação
+            if (state.audioCtx && state.audioCtx.state === 'suspended') {
+                state.audioCtx.resume();
+            }
+
+            DOM.audio.play().then(() => {
+                state.isPlaying = true;
+                DOM.playPauseIcon.className = 'fa-solid fa-pause text-sm';
+                renderLibrary(DOM.searchInput.value);
+            }).catch(e => {
+                console.error("Erro ao tocar:", e);
+                showToast("Selecione um arquivo de áudio válido", "error");
+            });
+        }
+
+        function pauseAudio() {
+            DOM.audio.pause();
+            state.isPlaying = false;
+            DOM.playPauseIcon.className = 'fa-solid fa-play text-sm ml-0.5';
+            renderLibrary(DOM.searchInput.value);
+        }
+
+        function togglePlayPause() {
+            if (state.library.length === 0) {
+                showToast("Envie uma música para reproduzir", "info");
+                return;
+            }
+            if (state.isPlaying) {
+                pauseAudio();
+            } else {
+                playAudio();
+            }
+        }
+
+        function playNextTrack() {
+            if (state.library.length === 0) return;
+            if (state.isShuffle) {
+                const randomIndex = Math.floor(Math.random() * state.library.length);
+                selectTrack(randomIndex, true);
+            } else {
+                const nextIndex = (state.currentTrackIndex + 1) % state.library.length;
+                selectTrack(nextIndex, true);
+            }
+        }
+
+        function playPrevTrack() {
+            if (state.library.length === 0) return;
+            const prevIndex = (state.currentTrackIndex - 1 + state.library.length) % state.library.length;
+            selectTrack(prevIndex, true);
+        }
+
+        async function removeTrack(id) {
+            const trackIdx = state.library.findIndex(t => t.id === id);
+            if (trackIdx === -1) return;
+
+            await deleteTrackFromDB(id);
+            state.library.splice(trackIdx, 1);
+
+            if (state.currentTrackIndex === trackIdx) {
+                if (state.library.length > 0) {
+                    selectTrack(Math.max(0, trackIdx - 1), state.isPlaying);
+                } else {
+                    DOM.audio.src = '';
+                    state.currentTrackIndex = -1;
+                    DOM.currentTrackTitle.textContent = 'Nenhuma música tocando';
+                    DOM.currentTrackArtist.textContent = 'Selecione ou envie um arquivo de áudio';
+                    DOM.playerBarTitle.textContent = 'Nenhuma faixa selecionada';
+                    DOM.playerBarArtist.textContent = 'Selecione uma música';
+                    pauseAudio();
+                }
+            } else if (state.currentTrackIndex > trackIdx) {
+                state.currentTrackIndex--;
+            }
+
+            renderLibrary();
+            showToast("Música removida da biblioteca", "info");
+        }
+
+        function setupAudioContext() {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                state.audioCtx = new AudioCtx();
+                state.analyser = state.audioCtx.createAnalyser();
+                state.analyser.fftSize = 128;
+
+                state.sourceNode = state.audioCtx.createMediaElementSource(DOM.audio);
+
+                // Equalizador de 3 Bandas (BiquadFilters)
+                state.eqFilters.bass = state.audioCtx.createBiquadFilter();
+                state.eqFilters.bass.type = 'lowshelf';
+                state.eqFilters.bass.frequency.value = 250;
+
+                state.eqFilters.mid = state.audioCtx.createBiquadFilter();
+                state.eqFilters.mid.type = 'peaking';
+                state.eqFilters.mid.frequency.value = 1500;
+                state.eqFilters.mid.Q.value = 1;
+
+                state.eqFilters.treble = state.audioCtx.createBiquadFilter();
+                state.eqFilters.treble.type = 'highshelf';
+                state.eqFilters.treble.frequency.value = 4000;
+
+                // Encadeamento do fluxo de áudio: AudioSource -> Bass -> Mid -> Treble -> Analyser -> Output
+                state.sourceNode.connect(state.eqFilters.bass);
+                state.eqFilters.bass.connect(state.eqFilters.mid);
+                state.eqFilters.mid.connect(state.eqFilters.treble);
+                state.eqFilters.treble.connect(state.analyser);
+                state.analyser.connect(state.audioCtx.destination);
+
+                startVisualizerAnimation();
+            } catch (e) {
+                console.warn("Web Audio API não iniciou completamente até a primeira interação do usuário:", e);
+            }
+        }
+
+        function startVisualizerAnimation() {
+            const canvas = DOM.visualizerCanvas;
+            const ctx = canvas.getContext('2d');
+
+            function draw() {
+                requestAnimationFrame(draw);
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (!state.analyser || !state.isPlaying) return;
+
+                const bufferLength = state.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+                state.analyser.getByteFrequencyData(dataArray);
+
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height / 2;
+                const radius = 80;
+                const bars = 36;
+
+                for (let i = 0; i < bars; i++) {
+                    const barHeight = (dataArray[i % bufferLength] / 255) * 50;
+                    const angle = (i * 2 * Math.PI) / bars;
+
+                    const x1 = centerX + Math.cos(angle) * radius;
+                    const y1 = centerY + Math.sin(angle) * radius;
+                    const x2 = centerX + Math.cos(angle) * (radius + barHeight);
+                    const y2 = centerY + Math.sin(angle) * (radius + barHeight);
+
+                    ctx.strokeStyle = '#22c55e';
+                    ctx.lineWidth = 3;
+                    ctx.lineCap = 'round';
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }
+            }
+            draw();
+        }
+
+        function setupPiPVideoCanvas() {
+            // Desenha um Canvas contínuo com Capa da música + Espectro sonoro para alimentar o Video PiP
+            const pCanvas = DOM.pipCanvas;
+            const pCtx = pCanvas.getContext('2d');
+
+            function renderPiPCanvasFrame() {
+                requestAnimationFrame(renderPiPCanvasFrame);
+
+                // Background Gradiente
+                const grad = pCtx.createLinearGradient(0, 0, 600, 600);
+                grad.addColorStop(0, '#090d16');
+                grad.addColorStop(1, '#1e1b4b');
+                pCtx.fillStyle = grad;
+                pCtx.fillRect(0, 0, 600, 600);
+
+                // Desenha a Capa no centro
+                const track = state.library[state.currentTrackIndex];
+                if (DOM.currentCoverImage.complete && DOM.currentCoverImage.naturalWidth !== 0) {
+                    pCtx.save();
+                    pCtx.beginPath();
+                    pCtx.roundRect(150, 80, 300, 300, 24);
+                    pCtx.clip();
+                    pCtx.drawImage(DOM.currentCoverImage, 150, 80, 300, 300);
+                    pCtx.restore();
+                }
+
+                // Título e Artista
+                pCtx.fillStyle = '#ffffff';
+                pCtx.font = 'bold 26px Inter, sans-serif';
+                pCtx.textAlign = 'center';
+                pCtx.fillText(track ? track.title : 'SoundPulse Audio', 300, 430);
+
+                pCtx.fillStyle = '#94a3b8';
+                pCtx.font = '500 18px Inter, sans-serif';
+                pCtx.fillText(track ? track.artist : 'Modo Picture-in-Picture', 300, 465);
+
+                // Barras de Áudio Animadas no PiP
+                if (state.analyser && state.isPlaying) {
+                    const bufferLength = state.analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    state.analyser.getByteFrequencyData(dataArray);
+
+                    const barWidth = 8;
+                    const gap = 6;
+                    const totalBars = 24;
+                    const startX = 300 - ((totalBars * (barWidth + gap)) / 2);
+
+                    for (let i = 0; i < totalBars; i++) {
+                        const val = dataArray[i * 2] || 0;
+                        const h = (val / 255) * 60 + 4;
+                        const x = startX + i * (barWidth + gap);
+                        const y = 540 - h;
+
+                        pCtx.fillStyle = '#22c55e';
+                        pCtx.beginPath();
+                        pCtx.roundRect(x, y, barWidth, h, 4);
+                        pCtx.fill();
+                    }
+                }
+            }
+
+            renderPiPCanvasFrame();
+
+            // Transmite a renderização do Canvas para o elemento Video oculto
+            const stream = pCanvas.captureStream(30);
+            DOM.pipVideo.srcObject = stream;
+        }
+
+        async function togglePictureInPicture() {
+            try {
+                if (!document.pictureInPictureEnabled) {
+                    showToast("Picture-in-Picture não é suportado neste navegador", "error");
+                    return;
+                }
+
+                if (document.pictureInPictureElement) {
+                    await document.exitPictureInPicture();
+                    showToast("Modo PiP desativado", "info");
+                } else {
+                    await DOM.pipVideo.play();
+                    await DOM.pipVideo.requestPictureInPicture();
+                    showToast("Modo PiP ativado com sucesso!", "success");
+                }
+            } catch (err) {
+                console.error("Erro no PiP:", err);
+                showToast("Clique na página antes de ativar o PiP", "info");
+            }
+        }
+
+        function updateMediaSessionMetadata(track) {
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: track.title,
+                    artist: track.artist,
+                    album: 'SoundPulse Library',
+                    artwork: [
+                        { src: track.coverUrl, sizes: '512x512', type: 'image/png' }
+                    ]
+                });
+
+                navigator.mediaSession.setActionHandler('play', () => playAudio());
+                navigator.mediaSession.setActionHandler('pause', () => pauseAudio());
+                navigator.mediaSession.setActionHandler('previoustrack', () => playPrevTrack());
+                navigator.mediaSession.setActionHandler('nexttrack', () => playNextTrack());
+            }
+        }
+
+        function renderPresetCovers() {
+            DOM.presetCoversGrid.innerHTML = '';
+            PRESET_COVERS.forEach((url) => {
+                const btn = document.createElement('button');
+                btn.className = 'w-full h-20 rounded-xl overflow-hidden border-2 border-transparent hover:border-brand-500 transition-all focus:outline-none';
+                btn.innerHTML = `<img src="${url}" class="w-full h-full object-cover">`;
+                btn.onclick = () => applyCoverToCurrentTrack(url);
+                DOM.presetCoversGrid.appendChild(btn);
+            });
+        }
+
+        function openCoverModalForTrack(trackId) {
+            state.activeTrackForCoverChange = trackId;
+            DOM.modalCoverArt.classList.remove('opacity-0', 'pointer-events-none');
+            DOM.modalCoverArt.firstElementChild.classList.remove('scale-95');
+            DOM.modalCoverArt.firstElementChild.classList.add('scale-100');
+        }
+
+        function closeCoverModal() {
+            DOM.modalCoverArt.classList.add('opacity-0', 'pointer-events-none');
+            DOM.modalCoverArt.firstElementChild.classList.remove('scale-100');
+            DOM.modalCoverArt.firstElementChild.classList.add('scale-95');
+        }
+
+        async function applyCoverToCurrentTrack(coverUrl) {
+            const trackId = state.activeTrackForCoverChange || (state.library[state.currentTrackIndex] ? state.library[state.currentTrackIndex].id : null);
+            if (!trackId) return;
+
+            const track = state.library.find(t => t.id === trackId);
+            if (track) {
+                track.coverUrl = coverUrl;
+                await saveTrackToDB(track);
+
+                if (state.library[state.currentTrackIndex] && state.library[state.currentTrackIndex].id === trackId) {
+                    DOM.currentCoverImage.src = coverUrl;
+                    DOM.playerBarCover.src = coverUrl;
+                }
+
+                renderLibrary(DOM.searchInput.value);
+                closeCoverModal();
+                showToast("Capa da música atualizada!", "success");
+            }
+        }
+
+        function setupEventListeners() {
+            // Upload de Arquivos via Input
+            DOM.fileInput.addEventListener('change', (e) => {
+                handleAudioUpload(e.target.files);
+                e.target.value = '';
+            });
+
+            // Drag & Drop na DropZone
+            DOM.dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                DOM.dropZone.classList.add('border-brand-500', 'bg-brand-500/10');
+            });
+
+            DOM.dropZone.addEventListener('dragleave', () => {
+                DOM.dropZone.classList.remove('border-brand-500', 'bg-brand-500/10');
+            });
+
+            DOM.dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                DOM.dropZone.classList.remove('border-brand-500', 'bg-brand-500/10');
+                if (e.dataTransfer.files.length) {
+                    handleAudioUpload(e.dataTransfer.files);
+                }
+            });
+
+            DOM.dropZone.addEventListener('click', () => DOM.fileInput.click());
+
+            // Player Bar Controles
+            DOM.btnPlayPause.addEventListener('click', togglePlayPause);
+            DOM.btnNext.addEventListener('click', playNextTrack);
+            DOM.btnPrev.addEventListener('click', playPrevTrack);
+
+            DOM.btnShuffle.addEventListener('click', () => {
+                state.isShuffle = !state.isShuffle;
+                DOM.btnShuffle.classList.toggle('text-brand-500', state.isShuffle);
+                showToast(state.isShuffle ? "Modo aleatório ativado" : "Modo aleatório desativado", "info");
+            });
+
+            DOM.btnRepeat.addEventListener('click', () => {
+                state.isRepeat = !state.isRepeat;
+                DOM.audio.loop = state.isRepeat;
+                DOM.btnRepeat.classList.toggle('text-brand-500', state.isRepeat);
+                showToast(state.isRepeat ? "Repetição ativada" : "Repetição desativada", "info");
+            });
+
+            // Velocidade de reprodução
+            DOM.btnSpeed.addEventListener('click', () => {
+                const speeds = [1.0, 1.25, 1.5, 2.0, 0.75];
+                const nextIdx = (speeds.indexOf(state.playbackSpeed) + 1) % speeds.length;
+                state.playbackSpeed = speeds[nextIdx];
+                DOM.audio.playbackRate = state.playbackSpeed;
+                DOM.btnSpeed.textContent = state.playbackSpeed + 'x';
+            });
+
+            // Atualização de Tempo do Áudio e Slider
+            DOM.audio.addEventListener('timeupdate', () => {
+                if (isNaN(DOM.audio.duration)) return;
+                const cur = DOM.audio.currentTime;
+                const dur = DOM.audio.duration;
+                DOM.seekSlider.value = (cur / dur) * 100;
+                DOM.currentTimeText.textContent = formatTime(cur);
+                DOM.durationTimeText.textContent = formatTime(dur);
+            });
+
+            DOM.seekSlider.addEventListener('input', (e) => {
+                if (isNaN(DOM.audio.duration)) return;
+                const targetTime = (e.target.value / 100) * DOM.audio.duration;
+                DOM.audio.currentTime = targetTime;
+            });
+
+            DOM.audio.addEventListener('ended', () => {
+                if (!state.isRepeat) playNextTrack();
+            });
+
+            // Volume
+            DOM.volumeSlider.addEventListener('input', (e) => {
+                DOM.audio.volume = e.target.value;
+                DOM.volumeIcon.className = e.target.value == 0 ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
+            });
+
+            DOM.btnMute.addEventListener('click', () => {
+                DOM.audio.muted = !DOM.audio.muted;
+                DOM.volumeIcon.className = DOM.audio.muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high';
+            });
+
+            // Botão Modo PiP
+            DOM.btnPipToggle.addEventListener('click', togglePictureInPicture);
+
+            // Modal Alterar Capa
+            DOM.btnChangeCover.addEventListener('click', () => openCoverModalForTrack());
+            DOM.btnCloseCoverModal.addEventListener('click', closeCoverModal);
+
+            DOM.coverFileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        applyCoverToCurrentTrack(event.target.result);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+
+            // Modal Equalizador
+            DOM.btnOpenEqualizer.addEventListener('click', () => {
+                DOM.modalEqualizer.classList.remove('opacity-0', 'pointer-events-none');
+            });
+            DOM.btnCloseEqModal.addEventListener('click', () => {
+                DOM.modalEqualizer.classList.add('opacity-0', 'pointer-events-none');
+            });
+
+            DOM.eqBass.addEventListener('input', (e) => {
+                if (state.eqFilters.bass) state.eqFilters.bass.gain.value = e.target.value;
+                DOM.eqBassVal.textContent = e.target.value + ' dB';
+            });
+            DOM.eqMid.addEventListener('input', (e) => {
+                if (state.eqFilters.mid) state.eqFilters.mid.gain.value = e.target.value;
+                DOM.eqMidVal.textContent = e.target.value + ' dB';
+            });
+            DOM.eqTreble.addEventListener('input', (e) => {
+                if (state.eqFilters.treble) state.eqFilters.treble.gain.value = e.target.value;
+                DOM.eqTrebleVal.textContent = e.target.value + ' dB';
+            });
+
+            DOM.btnResetEq.addEventListener('click', () => {
+                DOM.eqBass.value = 0;
+                DOM.eqMid.value = 0;
+                DOM.eqTreble.value = 0;
+                DOM.eqBassVal.textContent = '0 dB';
+                DOM.eqMidVal.textContent = '0 dB';
+                DOM.eqTrebleVal.textContent = '0 dB';
+                if (state.eqFilters.bass) state.eqFilters.bass.gain.value = 0;
+                if (state.eqFilters.mid) state.eqFilters.mid.gain.value = 0;
+                if (state.eqFilters.treble) state.eqFilters.treble.gain.value = 0;
+            });
+
+            // Busca na biblioteca
+            DOM.searchInput.addEventListener('input', (e) => {
+                renderLibrary(e.target.value);
+            });
+        }
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return "0:00";
+            const min = Math.floor(seconds / 60);
+            const sec = Math.floor(seconds % 60);
+            return `${min}:${sec < 10 ? '0' : ''}${sec}`;
+        }
+    </script>
+</body>
+</html>
